@@ -6,7 +6,6 @@ import re
 import argparse
 from collections import namedtuple
 import logging
-
 import datetime
 
 """
@@ -289,11 +288,18 @@ def main():
         help="Cache results to a file",
         default=None,
     )
+    parser.add_argument(
+        "-e",
+        "--expansion_limit",
+        type=int,
+        help="Comment expansion limit, None to expand everything",
+        default=None,
+    )
     args = parser.parse_args()
     
     logging.basicConfig(
         filename="wsb_scraper.log",
-        level=logging.INFO
+        level=logging.DEBUG
     )
     with open("wsb_scraper.log", "w") as f:
         f.write("")
@@ -312,14 +318,14 @@ def main():
         f.write(f"{datetime.datetime.now()}\n")
         f.write(_HEADER)
 
-        logging.info(f"Submissions: args.submission")
+        logging.info(f"Submissions: {args.submission}")
 
         ticker_induced_comment_count = defaultdict(int)
         for submission_id in args.submission:
             submission = reddit.submission(id=submission_id)
             res = scrape_submission(
                 submission,
-                comment_expansion_limit=32
+                comment_expansion_limit=args.expansion_limit,
             )
             write_submission_result(f, res)
 
