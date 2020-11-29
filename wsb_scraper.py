@@ -22,14 +22,21 @@ For a submissions with certain tickers in the title:
     - How does an "hype" metric.
 
 
-Prototype 1:
+V1:
     - Count the occurence of tickers in a submission.
     - Ticker is only counted once per comment.
     - Specify submission with command line arg.
 
 
-Prototype 2:
+V2:
     - Allow multiple submissions to be specified and parsed.
+
+V3:
+    - For a ticker that appears in a submission,
+    - Count the number of comments it has.
+    - Aggregate the ticker count over many submissions.
+    - Also note the upvote score for submissions.
+    - Coin this metrics as: ticker induced comments.
 """
 
 _MAX_TICKER_LEN = 5
@@ -64,6 +71,8 @@ _TICKER_BLACK_LIST = {
     "SO",
     "FOMO",
 }
+
+_HEADER = "=================================\n"
 
 # TODO: Use a mapping between tickers and company names.
 _TICKER_WEIGHT_THRESH = 0.01
@@ -139,10 +148,11 @@ def set_to_count(s):
 def extract_tickers_from_submission_content(submission):
     """Does not look at the comments"""
     ticker_set = set()
-    ticker_set.union(extract_tickers_from_text(submission.name))
-    ticker_set.union(extract_tickers_from_text(submission.title))
-    ticker_set.union(extract_tickers_from_text(submission.selftext))
-    return ticker_set
+    ret = ticker_set \
+        .union(extract_tickers_from_text(submission.name))      \
+        .union(extract_tickers_from_text(submission.title))     \
+        .union(extract_tickers_from_text(submission.selftext))
+    return ret
 
 
 def merge_word_counts(acquirer, acquiree):
@@ -152,7 +162,16 @@ def merge_word_counts(acquirer, acquiree):
 
 SubmissionResults = namedtuple(
     "SubmissionResults",
-    "ticker_counts comment_count submission")
+    "ticker_counts comment_count submission"
+)
+
+
+def count_ticker_induced_comments(submission):
+    post_ticker_set = extract_tickers_from_submission_content(submission)
+    post_ticker_count = set_to_count(post_ticker_set)
+    for t in post_ticker_count:
+        post_ticker_count[t] = submission.num_comments
+    return post_ticker_count
 
 
 def scrape_submission(submission,
@@ -161,8 +180,10 @@ def scrape_submission(submission,
     submission_ticker_count = defaultdict(int)
 
     post_ticker_set = extract_tickers_from_submission_content(submission)
-    post_ticker_count = set_to_count(post_ticker_set)
-    merge_word_counts(submission_ticker_count, post_ticker_count)
+    merge_word_counts(
+        submission_ticker_count,
+        set_to_count(post_ticker_set)
+    )
 
     comment_forest = submission.comments
 
@@ -196,7 +217,6 @@ def scrape_submission(submission,
 def scrape_subreddit(subreddit):
     for submission in subreddit.hot(limit=1):
         submission_ticker_count = scrape_submission(submission)
-        print(submission_ticker_count)
         
 
 def sort_ticker_counts(ticker_counts):
@@ -228,17 +248,24 @@ def normalize_ticker_count_per_comment(ticker_counts, num_comments):
     return ret
 
 def write_submission_result(f, res):
-    f.write("=================================\n")
-    f.write(f"Submission Title: {res.submission.title}\n")
-    f.write(f"Submission URL: {res.submission.url}\n")
-    f.write(f"Comments Parsed: {res.comment_count}\n")
-    f.write(f"Ticker Counts:\n{format_ticker_counts(res.ticker_counts)}\n")
+    logging.info(f"Writing submission results to {f.name}")       
+    f.write(
+        f"Submission Title: {res.submission.title}\n"
+        f"Submission URL: {res.submission.url}\n"
+        f"Submission ID: {res.submission.id}\n"
+        f"Comments Parsed: {res.comment_count}\n"
+        f"Ticker Counts:\n"
+        f"{format_ticker_counts(res.ticker_counts)}\n"
+    )
+
     normalized_tc = normalize_ticker_count_per_comment(
         res.ticker_counts,
         res.comment_count
     )
-    f.write(f"Ticker Occurence / Comment:\n{format_ticker_count_per_comment(normalized_tc)}\n")
-
+    normalized_tc_str = format_ticker_count_per_comment(normalized_tc)
+    f.write(f"Ticker Occurence / Comment:\n{normalized_tc_str}\n")
+    f.write(f"{_HEADER}")
+    
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -283,17 +310,30 @@ def main():
     # If file does not exist create it. If it does exist, overwrite.
     with open(args.output, "w") as f:
         f.write(f"{datetime.datetime.now()}\n")
+        f.write(_HEADER)
 
         logging.info(f"Submissions: args.submission")
 
-        for submission in args.submission:
-            submission = reddit.submission(id=submission)
+        ticker_induced_comment_count = defaultdict(int)
+        for submission_id in args.submission:
+            submission = reddit.submission(id=submission_id)
             res = scrape_submission(
                 submission,
                 comment_expansion_limit=32
             )
-            logging.info(f"Writing submission results to {args.output}")
             write_submission_result(f, res)
+
+            merge_word_counts(
+                ticker_induced_comment_count,
+                count_ticker_induced_comments(submission)
+            )
+
+        f.write(
+            f"Ticker Induced Comment Count:\n"
+            f"{format_ticker_counts(ticker_induced_comment_count)}\n"
+            f"{_HEADER}"
+        )
+
 
 if __name__ == "__main__":
     main()
