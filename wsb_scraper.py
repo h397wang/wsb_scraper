@@ -7,6 +7,7 @@ import argparse
 from collections import namedtuple
 import logging
 
+import datetime
 
 """
 Resources:
@@ -27,6 +28,8 @@ Prototype 1:
     - Specify submission with command line arg.
 
 
+Prototype 2:
+    - Allow multiple submissions to be specified and parsed.
 """
 
 _MAX_TICKER_LEN = 5
@@ -62,8 +65,9 @@ _TICKER_BLACK_LIST = {
     "FOMO",
 }
 
+# TODO: Use a mapping between tickers and company names.
 _TICKER_WEIGHT_THRESH = 0.01
-_TICKER_COUNT_THRESH = 5
+_TICKER_COUNT_THRESH = 2
 
 _delimiters = "|".join([
     "\s",
@@ -208,28 +212,32 @@ def sort_ticker_counts(ticker_counts):
 
 def format_ticker_counts(ticker_counts):
     tc_s = sort_ticker_counts(ticker_counts)
-    fstr = "\n".join(f"{k}: {v}" for k, v in tc_s.items())
+    fstr = "\n".join(f"\t{k}: {v}" for k, v in tc_s.items())
+    return fstr
+
+def format_ticker_count_per_comment(ticker_counts):
+    tc_s = sort_ticker_counts(ticker_counts)
+    fstr = "\n".join(f"\t{k}: {v:.2f}" for k, v in tc_s.items())
     return fstr
 
 def normalize_ticker_count_per_comment(ticker_counts, num_comments):
     ret = {
-        t : c / num_comments
+        t : 100 * c / num_comments
         for t, c in ticker_counts.items()
     }
     return ret
 
-def write_submission_result(fname, res):
-    with open(fname, "w") as f:
-        f.write(f"Submission Title: {res.submission.title}\n")
-        f.write(f"Submission URL: {res.submission.url}\n")
-        f.write(f"Comments Parsed: {res.comment_count}\n")
-        f.write(f"Ticker Counts:\n{format_ticker_counts(res.ticker_counts)}\n")
-        normalized_tc = normalize_ticker_count_per_comment(
-            res.ticker_counts,
-            res.comment_count
-        )
-        f.write(f"Ticker Occurence / Comment:\n{format_ticker_counts(normalized_tc)}\n")
-
+def write_submission_result(f, res):
+    f.write("=================================\n")
+    f.write(f"Submission Title: {res.submission.title}\n")
+    f.write(f"Submission URL: {res.submission.url}\n")
+    f.write(f"Comments Parsed: {res.comment_count}\n")
+    f.write(f"Ticker Counts:\n{format_ticker_counts(res.ticker_counts)}\n")
+    normalized_tc = normalize_ticker_count_per_comment(
+        res.ticker_counts,
+        res.comment_count
+    )
+    f.write(f"Ticker Occurence / Comment:\n{format_ticker_count_per_comment(normalized_tc)}\n")
 
 def main():
     parser = argparse.ArgumentParser()
@@ -237,6 +245,7 @@ def main():
         "-s",
         "--submission",
         type=str,
+        nargs="+",
         help="Submission ID (e.g k29omq)"
     )
     parser.add_argument(
@@ -259,6 +268,8 @@ def main():
         filename="wsb_scraper.log",
         level=logging.INFO
     )
+    with open("wsb_scraper.log", "w") as f:
+        f.write("")
 
     reddit = praw.Reddit(
         client_id="Q0GxKcurTVudUQ",
@@ -269,14 +280,20 @@ def main():
     )
     wsb = reddit.subreddit("wallstreetbets")
 
+    # If file does not exist create it. If it does exist, overwrite.
+    with open(args.output, "w") as f:
+        f.write(f"{datetime.datetime.now()}\n")
 
-    submission = reddit.submission(id=args.submission)
-    res = scrape_submission(
-        submission,
-        comment_expansion_limit=32
-    )
-    logging.info(f"Writing submission results to {args.output}")
-    write_submission_result(args.output, res)
+        logging.info(f"Submissions: args.submission")
+
+        for submission in args.submission:
+            submission = reddit.submission(id=submission)
+            res = scrape_submission(
+                submission,
+                comment_expansion_limit=32
+            )
+            logging.info(f"Writing submission results to {args.output}")
+            write_submission_result(f, res)
 
 if __name__ == "__main__":
     main()
